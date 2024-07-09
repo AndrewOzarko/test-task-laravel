@@ -10,10 +10,16 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Spatie\SimpleExcel\SimpleExcelReader;
 use App\Models\Item;
+use Illuminate\Support\Facades\DB;
+
 
 class ImportCSVJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public $timeout = 2200;
+
+    private const BATCH_SIZE = 1000;
 
     /**
      * Create a new job instance.
@@ -31,11 +37,23 @@ class ImportCSVJob implements ShouldQueue
         $pathToCsv = storage_path('app/public/meyer_inventory.csv');
         $rows = SimpleExcelReader::create($pathToCsv)
         ->useHeaders(['MFGName','MFG Item Number','Item Number','Available','LTL','MFG Qty Available','Stocking','Special Order','Oversize','Addtl Handling Charge'])
-        ->getRows()
-        ->each(function($row) {
+        ->getRows();
+
+        $batch = [];
+        $rows->each(function($row) use (&$batch) {
             $data = $this->convertItem($row);
-            Item::query()->create($data);
-        });    
+            $batch[] = $data;
+
+            if (count($batch) >= self::BATCH_SIZE) {
+                Item::insert($batch);
+                $batch = [];
+            }
+        });
+
+        if (!empty($batch)) {
+            Item::insert($batch);
+        }
+
     }
 
     public function convertItem(array $data): array {
